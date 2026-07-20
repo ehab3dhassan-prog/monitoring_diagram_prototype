@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm -v)",
+      "Bash(mkdir -p src)",
+      "Bash(cp \"emission-monitoring-diagram-tool \\(2\\).jsx\" src/EmissionDiagramTool.jsx)",
+      "Bash(npx vite *)",
+      "WebFetch(domain:www.ezzsteel.com)",
+      "Bash(curl -sL --max-time 60 -A \"Mozilla/5.0\" \"https://www.ezzsteel.com/assets/application/application_en-a0d342dcf9d028af0e58f977f58221ce1d0103932f497d0ae02d244ce6bffbac.css\" -o /tmp/ezz.css)",
+      "Bash(grep -oE '[^{}]{0,90}\\\\{[^{}]*#fdc810[^{}]*\\\\}' /tmp/ezz.css)",
+      "PowerShell(npm run dev)"
+    ]
+  }
+}

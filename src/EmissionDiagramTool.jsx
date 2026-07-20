@@ -177,6 +177,8 @@ export default function EmissionDiagramTool() {
       // a product shows the full journey that produced it (upstream)
       const q = [activeTrace];
       while (q.length) { const cur = q.shift(); for (const e of edges) if (e.target === cur && !set.has(e.source)) { set.add(e.source); q.push(e.source); } }
+      // emissions hang off the processes as a second output, so the upstream walk misses them
+      for (const e of edges) if (set.has(e.source) && nodeMap[e.target]?.type === "emissions") set.add(e.target);
     }
     return set;
   }, [activeTrace, edges, nodeMap]);

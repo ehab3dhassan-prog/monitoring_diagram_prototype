@@ -341,7 +341,7 @@ export default function EmissionDiagramTool() {
         <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
           <img src={logoUrl} alt="Ezz Steel" style={{ height: 30, display: "block" }} />
           <span style={{ width: 1, height: 18, background: "#4E4E4E" }} />
-          <span style={{ fontWeight: 600, fontSize: 14, color: "#fff" }}>Emission monitoring plan</span>
+          {/* <span style={{ fontWeight: 600, fontSize: 14, color: "#fff" }}>Emission monitoring plan</span> */}
           <span style={{ fontSize: 12, color: BRAND.yellow, border: `1px solid ${BRAND.yellow}66`, borderRadius: 7, padding: "3px 8px" }}>Ezz Dekheila</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

@@ -14,7 +14,8 @@
       "PowerShell(git -C e:\\\\Repos\\\\monitoring_diagram_prototype status --short)",
       "PowerShell(Test-Path e:\\\\Repos\\\\monitoring_diagram_prototype\\\\.gitignore; \\(Get-Command vercel -ErrorAction SilentlyContinue\\).Source; \\(Get-Command gh -ErrorAction SilentlyContinue\\).Source)",
       "PowerShell(cd e:\\\\Repos\\\\monitoring_diagram_prototype; git ls-files | Where-Object { $_ -match 'node_modules/@\\(esbuild|rollup\\)/' } | ForEach-Object { \\($_ -split '/'\\)[1,2] -join '/' } | Sort-Object -Unique)",
-      "PowerShell(try { $r = Invoke-WebRequest -Uri \"https://api.github.com/repos/ehab3dhassan-prog/monitoring_diagram_prototype\" -UseBasicParsing -Headers @{ \"User-Agent\"=\"check\" }; $j = $r.Content | ConvertFrom-Json; \"VISIBILITY: $\\($j.visibility\\)\"; \"DEFAULT BRANCH: $\\($j.default_branch\\)\"; \"OWNER TYPE: $\\($j.owner.type\\)\" } catch { \"HTTP: $\\($_.Exception.Response.StatusCode.value__\\) - repo is private or missing\" })"
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"https://api.github.com/repos/ehab3dhassan-prog/monitoring_diagram_prototype\" -UseBasicParsing -Headers @{ \"User-Agent\"=\"check\" }; $j = $r.Content | ConvertFrom-Json; \"VISIBILITY: $\\($j.visibility\\)\"; \"DEFAULT BRANCH: $\\($j.default_branch\\)\"; \"OWNER TYPE: $\\($j.owner.type\\)\" } catch { \"HTTP: $\\($_.Exception.Response.StatusCode.value__\\) - repo is private or missing\" })",
+      "PowerShell(npx vite build --logLevel warn)"
     ]
   }
 }

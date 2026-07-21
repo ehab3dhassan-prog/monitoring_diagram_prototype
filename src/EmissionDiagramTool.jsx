@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import {
   Package, Zap, Flame, Cog, Box, Cloud, Gauge, Plus, Layers,
-  ChevronRight, ArrowLeft, X, Route, Trash2,
+  ChevronRight, ArrowLeft, X, Route, Trash2, Lock, Users,
   Maximize2, Minimize2, ZoomIn, ZoomOut, Maximize, Move
 } from "lucide-react";
 
@@ -28,6 +28,37 @@ const TYPES = {
   product:   { color: "#059669", Icon: Box,     label: "Product", emit: null },
   emissions: { color: "#E11D48", Icon: Cloud,   label: "Emissions", emit: null },
 };
+// ---------------------------------------------------------------- people & access
+// Prototype only: this demonstrates the responsibility/access model, it is NOT real auth.
+// Everything here is client-side and is meant to be shown and explained, not relied on.
+// TODO(Ezz): exact names + job titles still owed by the client — placeholders below follow
+// the three families he named in the meeting: sustainability, quality, operations.
+const PEOPLE = [
+  { id: "u_sus",  short: "SUST",   title: "Sustainability & compliance", role: "manager", color: "#4F46E5" },
+  { id: "u_dri",  short: "DRI",    title: "Operations · DRI",            role: "owner",   color: "#2563EB" },
+  { id: "u_eaf",  short: "EAF",    title: "Operations · steelmaking",    role: "owner",   color: "#DB2777" },
+  { id: "u_roll", short: "ROLL",   title: "Operations · rolling mill",   role: "owner",   color: "#0891B2" },
+  { id: "u_ene",  short: "ENERGY", title: "Utilities · grid metering",   role: "owner",   color: "#CA8A04" },
+  { id: "u_qa",   short: "QA",     title: "Quality assurance",           role: "viewer",  color: "#64748B" },
+];
+const ROLES = {
+  manager: { label: "Full access", bg: "#ECFDF5", fg: "#065F46" },
+  owner:   { label: "Owner",       bg: "#EFF6FF", fg: "#1D4ED8" },
+  viewer:  { label: "Read only",   bg: "#F0F0F0", fg: "#707070" },
+};
+const personOf = (id) => PEOPLE.find((p) => p.id === id) || null;
+// a manager edits everything; an owner edits only what they own; a viewer edits nothing
+const mayEdit = (user, node) => !!user && !!node && (user.role === "manager" || (user.role === "owner" && node.owner === user.id));
+
+// who owns each top-level node — the meter network reuses the `resp` already in the registry
+const OWNER_OF = {
+  p_dri: "u_dri", mat_dri: "u_dri", energy_dri: "u_dri", fuel_dri: "u_dri", em_dri: "u_dri", dri: "u_dri",
+  p_eaf: "u_eaf", mat_eaf: "u_eaf", energy_eaf: "u_eaf", fuel_eaf: "u_eaf", em_eaf: "u_eaf", billet: "u_eaf",
+  p_roll: "u_roll", energy_roll: "u_roll", fuel_roll: "u_roll", em_roll: "u_roll", rebar: "u_roll",
+  elec_net: "u_ene",
+};
+const RESP_OWNER = { "Grid metering": "u_ene", "DRI unit": "u_dri", Meltshop: "u_eaf", Rolling: "u_roll" };
+
 const CONTAINERS = ["material", "energy", "fuel"];
 const isContainer = (t) => CONTAINERS.includes(t);
 const styleOf = (n) => TYPES[n.type] || TYPES.material;
@@ -106,7 +137,9 @@ const ELEC_EDGES = [
   ["MG-01", "E-01"], ["MG-02", "E-02"], ["MG-02", "E-05"], ["MG-03", "E-08"],
 ].map(([source, target], i) => ({ id: `el${i}`, source, target, parent: "elec_net" }));
 
-const SEED_NODES = [...P, ...CHILDREN, ...ELEC_NET];
+// meters/streams inherit their container's owner; network meters resolve from their `resp`
+const withOwner = (n) => ({ ...n, owner: OWNER_OF[n.id] || (n.resp && RESP_OWNER[n.resp]) || OWNER_OF[n.parent] || null });
+const SEED_NODES = [...P, ...CHILDREN, ...ELEC_NET].map(withOwner);
 const SEED_EDGES = [...[
   ["mat_dri", "p_dri"], ["energy_dri", "p_dri"], ["fuel_dri", "p_dri"],
   ["p_dri", "dri"], ["p_dri", "em_dri"],
@@ -140,6 +173,13 @@ export default function EmissionDiagramTool() {
   const [hoverContainer, setHoverContainer] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set());
   const [focus, setFocus] = useState(null);
+  // access simulation — start as the manager so the diagram opens fully editable
+  const [userId, setUserId] = useState("u_sus");
+  const [onlyMine, setOnlyMine] = useState(false);
+  const [denied, setDenied] = useState(null);
+  const me = personOf(userId);
+  const canEdit = (n) => mayEdit(me, n);
+  const deny = (msg) => setDenied({ msg, id: Date.now() });
   const toggle = (id) => setExpanded((s) => { const c = new Set(s); c.has(id) ? c.delete(id) : c.add(id); return c; });
 
   // canvas viewport: world→screen is  screen = view.{x,y} + world * view.k  (transformOrigin 0 0)
@@ -157,8 +197,11 @@ export default function EmissionDiagramTool() {
 
   const nodeMap = useMemo(() => Object.fromEntries(nodes.map((n) => [n.id, n])), [nodes]);
   const childrenOf = (id) => nodes.filter((n) => n.parent === id);
-  const viewNodes = nodes.filter((n) => n.parent === parent);
-  const viewEdges = edges.filter((e) => e.parent === parent);
+  // "only my scope" hides everything the signed-in person is not responsible for
+  const inScope = (n) => !onlyMine || !me || me.role === "manager" || n.owner === me.id;
+  const viewNodes = nodes.filter((n) => n.parent === parent && inScope(n));
+  const shownIds = new Set(viewNodes.map((n) => n.id));
+  const viewEdges = edges.filter((e) => e.parent === parent && (!onlyMine || (shownIds.has(e.source) && shownIds.has(e.target))));
   const selNode = nodeMap[selected];
   const parentNode = parent ? nodeMap[parent] : null;
 
@@ -293,6 +336,7 @@ export default function EmissionDiagramTool() {
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
   }
   function startConnect(e, node) {
+    if (!canEdit(node)) { e.stopPropagation(); return deny(`${ownerTitle(node)} owns this — you cannot rewire it`); }
     e.stopPropagation(); e.preventDefault();
     setPreview({ x1: node.x + NW, y1: node.y + NH / 2, x2: node.x + NW, y2: node.y + NH / 2 });
     const move = (ev) => { const q = localXY(ev); setPreview({ x1: node.x + NW, y1: node.y + NH / 2, x2: q.x, y2: q.y }); };
@@ -305,17 +349,32 @@ export default function EmissionDiagramTool() {
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
   }
   function addNode(type) {
+    if (!me || me.role === "viewer") return deny("Read-only access — you cannot add items");
+    if (parentNode && !canEdit(parentNode)) return deny(`${ownerTitle(parentNode)} owns this level — read-only for you`);
     const c = viewNodes.length, id = uid("n");
-    const base = { id, parent, x: 40 + (c % 4) * 26, y: 50 + (c % 4) * 26, cbam: true, ets: false };
+    // inside a container the new item stays with the container's owner; an owner creating at the
+    // top level keeps it. A manager owns nothing operationally, so their new node starts
+    // unassigned and has to be handed to the process that will actually report it.
+    const owner = (parentNode && parentNode.owner) || (me.role === "manager" ? null : me.id);
+    const base = { id, parent, x: 40 + (c % 4) * 26, y: 50 + (c % 4) * 26, cbam: true, ets: false, owner };
     let node;
     if (type === "meter") node = { ...base, type: "meter", meterId: "M-00", value: 0, unit: "MWh", label: "M-00" };
     else if (type === "stream") node = { ...base, type: "stream", label: "New material" };
     else node = { ...base, type, label: TYPES[type].label.split(" · ")[0], ...(type === "product" ? { final: false } : {}) };
     setNodes((ns) => [...ns, node]); setSelected(id);
   }
-  const patch = (id, o) => setNodes((ns) => ns.map((n) => n.id === id ? { ...n, ...o } : n));
+  const ownerTitle = (n) => personOf(n?.owner)?.title || "Unassigned";
+  const patch = (id, o) => {
+    const n = nodeMap[id];
+    if (n && !canEdit(n)) return deny(`${ownerTitle(n)} owns this — read-only for you`);
+    // handing a container to another team hands over its meters/streams with it
+    const cascade = "owner" in o;
+    setNodes((ns) => ns.map((x) => x.id === id ? { ...x, ...o } : cascade && x.parent === id ? { ...x, owner: o.owner } : x));
+  };
   function removeNode(id) {
-    setNodes((ns) => ns.filter((n) => n.id !== id && n.parent !== id));
+    const n = nodeMap[id];
+    if (n && !canEdit(n)) return deny(`${ownerTitle(n)} owns this — you cannot delete it`);
+    setNodes((ns) => ns.filter((n2) => n2.id !== id && n2.parent !== id));
     setEdges((es) => es.filter((e) => e.source !== id && e.target !== id));
     setSelected(null); setPinnedTrace(null);
   }
@@ -333,7 +392,9 @@ export default function EmissionDiagramTool() {
     setSelected(null); setPinnedTrace(null); setHoverTrace(null);
   };
   const goCrumb = (i) => { setCrumbs((c) => c.slice(0, i + 1)); setSelected(null); setPinnedTrace(null); setFocus(null); };
+  const canAdd = !!me && me.role !== "viewer" && (!parentNode || canEdit(parentNode));
   useEffect(() => { resetView(); }, [parent]); // each drill level gets a fresh viewport
+  useEffect(() => { if (!denied) return; const t = setTimeout(() => setDenied(null), 2600); return () => clearTimeout(t); }, [denied]);
   const dim = (id) => traceSet && !traceSet.has(id);
 
   return (
@@ -355,33 +416,61 @@ export default function EmissionDiagramTool() {
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderBottom: "1px solid #E0E0E2", background: BRAND.lineSoft, fontSize: 12 }}>
-        {crumbs.length > 1 && <button onClick={() => goCrumb(crumbs.length - 2)} style={ghost}><ArrowLeft size={13} /></button>}
-        {crumbs.map((c, i) => (
-          <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            {i > 0 && <ChevronRight size={13} color="#BCBCBC" />}
-            <button onClick={() => goCrumb(i)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 12, color: i === crumbs.length - 1 ? "#2D2D2D" : "#707070", fontWeight: i === crumbs.length - 1 ? 600 : 400 }}>{c.label}</button>
-          </span>
-        ))}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "7px 14px", borderBottom: "1px solid #E0E0E2", background: BRAND.lineSoft, fontSize: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+          {crumbs.length > 1 && <button onClick={() => goCrumb(crumbs.length - 2)} style={ghost}><ArrowLeft size={13} /></button>}
+          {crumbs.map((c, i) => (
+            <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              {i > 0 && <ChevronRight size={13} color="#BCBCBC" />}
+              <button onClick={() => goCrumb(i)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 12, color: i === crumbs.length - 1 ? "#2D2D2D" : "#707070", fontWeight: i === crumbs.length - 1 ? 600 : 400 }}>{c.label}</button>
+            </span>
+          ))}
+        </div>
+
+        {/* signed-in identity — stands in for the real sign-in until there is a backend */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <Users size={13} color="#707070" />
+          <span style={{ fontSize: 11, color: "#707070" }}>Signed in as</span>
+          <select value={userId} onChange={(e) => { setUserId(e.target.value); setSelected(null); setPinnedTrace(null); }}
+            style={{ fontSize: 11.5, padding: "4px 6px", border: "1px solid #E0E0E2", borderRadius: 7, background: "#fff", color: "#2D2D2D", cursor: "pointer" }}>
+            {PEOPLE.map((p) => <option key={p.id} value={p.id}>{p.short} · {p.title}</option>)}
+          </select>
+          {me && <span style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, padding: "3px 7px", borderRadius: 20, background: ROLES[me.role].bg, color: ROLES[me.role].fg }}>{ROLES[me.role].label}</span>}
+          {me && me.role === "owner" && (
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "#707070", cursor: "pointer" }}>
+              <input type="checkbox" checked={onlyMine} onChange={(e) => { setOnlyMine(e.target.checked); setSelected(null); setPinnedTrace(null); }} /> only my scope
+            </label>
+          )}
+        </div>
       </div>
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         <div style={{ width: 138, borderRight: "1px solid #ECEDED", padding: "12px 10px", display: "flex", flexDirection: "column", gap: 7, overflowY: "auto" }}>
           <span style={{ fontSize: 10, letterSpacing: ".05em", textTransform: "uppercase", color: "#A3A3A3", paddingLeft: 2 }}>Add</span>
           {parentNode && (parentNode.type === "energy" || parentNode.type === "fuel") ? (
-            <PalItem label="Meter" color="#0F766E" Icon={Gauge} onClick={() => addNode("meter")} />
+            <PalItem label="Meter" color="#0F766E" Icon={Gauge} onClick={() => addNode("meter")} disabled={!canAdd} />
           ) : parentNode && parentNode.type === "material" ? (
-            <PalItem label="Material stream" color="#2563EB" Icon={Package} onClick={() => addNode("stream")} />
+            <PalItem label="Material stream" color="#2563EB" Icon={Package} onClick={() => addNode("stream")} disabled={!canAdd} />
           ) : (
             <>
-              <PalItem label="Raw materials" color="#2563EB" Icon={Package} onClick={() => addNode("material")} />
-              <PalItem label="Electricity" color="#CA8A04" Icon={Zap} onClick={() => addNode("energy")} />
-              <PalItem label="Natural gas" color="#0891B2" Icon={Flame} onClick={() => addNode("fuel")} />
-              <PalItem label="Process" color="#7C3AED" Icon={Cog} onClick={() => addNode("process")} />
-              <PalItem label="Product" color="#059669" Icon={Box} onClick={() => addNode("product")} />
-              <PalItem label="Emissions" color="#E11D48" Icon={Cloud} onClick={() => addNode("emissions")} />
+              <PalItem label="Raw materials" color="#2563EB" Icon={Package} onClick={() => addNode("material")} disabled={!canAdd} />
+              <PalItem label="Electricity" color="#CA8A04" Icon={Zap} onClick={() => addNode("energy")} disabled={!canAdd} />
+              <PalItem label="Natural gas" color="#0891B2" Icon={Flame} onClick={() => addNode("fuel")} disabled={!canAdd} />
+              <PalItem label="Process" color="#7C3AED" Icon={Cog} onClick={() => addNode("process")} disabled={!canAdd} />
+              <PalItem label="Product" color="#059669" Icon={Box} onClick={() => addNode("product")} disabled={!canAdd} />
+              <PalItem label="Emissions" color="#E11D48" Icon={Cloud} onClick={() => addNode("emissions")} disabled={!canAdd} />
             </>
           )}
+          {!canAdd && <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#A3A3A3", paddingLeft: 2 }}><Lock size={10} /> read-only here</div>}
+          <div style={{ height: 1, background: "#ECEDED", margin: "4px 0" }} />
+          <span style={{ fontSize: 10, letterSpacing: ".05em", textTransform: "uppercase", color: "#A3A3A3", paddingLeft: 2 }}>Responsible</span>
+          {PEOPLE.filter((p) => p.role !== "viewer").map((p) => (
+            <div key={p.id} title={p.title} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: p.id === userId ? "#2D2D2D" : "#707070", fontWeight: p.id === userId ? 600 : 400, paddingLeft: 2 }}>
+              <span style={{ width: 6, height: 6, borderRadius: 6, background: p.color, flexShrink: 0 }} />
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.short}</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 9.5, color: "#BCBCBC", lineHeight: 1.5, paddingLeft: 2 }}>Names &amp; titles to be confirmed with Ezz.</div>
           <div style={{ height: 1, background: "#ECEDED", margin: "4px 0" }} />
           <div style={{ fontSize: 10.5, color: "#707070", lineHeight: 1.55, paddingLeft: 2 }}>
             Each process has its own electricity, gas and raw materials. Factory main meter = sum of the per-process meters. Direct vs indirect follows the Ezz stream table.
@@ -421,6 +510,7 @@ export default function EmissionDiagramTool() {
               const show = cont && (expanded.has(n.id) || hoverContainer === n.id || inTrace);
               const capped = kids.slice(0, 5), extra = kids.length - capped.length;
               const HdrIcon = isNet ? Gauge : s.Icon;
+              const editable = canEdit(n), own = personOf(n.owner);
               return (
                 <div key={n.id}
                   onPointerDown={(e) => { e.stopPropagation(); startDrag(e, n); }}
@@ -436,10 +526,14 @@ export default function EmissionDiagramTool() {
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".03em", color: hc, fontWeight: 600 }}>
                       <HdrIcon size={12} /> {isNet ? meterKind(n) : n.type === "product" && n.final ? "Final product" : n.type === "stream" ? "Material" : s.label}
                     </span>
-                    {isNet ? <span style={{ fontSize: 8.5, padding: "1px 5px", borderRadius: 20, background: hc + "18", color: hc }}>{n.read}</span> : n.type === "meter" ? null : <EmitTag kind={s.emit} />}
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                      {!editable && <Lock size={10} color="#BCBCBC" />}
+                      {isNet ? <span style={{ fontSize: 8.5, padding: "1px 5px", borderRadius: 20, background: hc + "18", color: hc }}>{n.read}</span> : n.type === "meter" ? null : <EmitTag kind={s.emit} />}
+                    </span>
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 600, marginTop: 2 }}>{isNet ? n.meterId : n.label}</div>
                   {isNet && <div style={{ fontSize: 9.5, color: "#A3A3A3", marginTop: 1 }}>{n.label}</div>}
+                  {own && <div style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 3, fontSize: 9, letterSpacing: ".03em", color: "#A3A3A3" }}><span style={{ width: 5, height: 5, borderRadius: 5, background: own.color }} />{own.short}</div>}
 
                   {n.type === "meter" && <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, fontSize: 10.5, color: hc }}><span style={{ width: 6, height: 6, borderRadius: 6, background: "#10B981" }} /> {Number(n.value).toLocaleString()} {n.unit}</div>}
                   {reconOk !== null && <div style={{ marginTop: 3, fontSize: 9.5, color: reconOk ? "#0F766E" : "#C0392B" }}>{reconOk ? "✓" : "⚠"} Σ sub = {cSum.toLocaleString()} {n.unit}</div>}
@@ -486,13 +580,20 @@ export default function EmissionDiagramTool() {
           <div style={{ position: "absolute", right: 12, bottom: 12, display: "inline-flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "#A3A3A3", background: "#FFFFFFCC", padding: "3px 8px", borderRadius: 7 }}>
             <Move size={11} /> drag canvas to pan · ctrl + scroll to zoom
           </div>
+
+          {denied && (
+            <div style={{ position: "absolute", left: "50%", bottom: 56, transform: "translateX(-50%)", display: "inline-flex", alignItems: "center", gap: 7, background: BRAND.ink, color: "#fff", fontSize: 11.5, padding: "8px 13px", borderRadius: 9, boxShadow: "0 3px 12px #00000026", zIndex: 5, whiteSpace: "nowrap" }}>
+              <Lock size={12} color={BRAND.yellow} /> {denied.msg}
+            </div>
+          )}
         </div>
 
         <div style={{ width: 250, borderLeft: "1px solid #ECEDED", padding: 14, overflowY: "auto" }}>
           {pinnedTrace && traceSet ? (
             <TracePanel root={nodeMap[pinnedTrace]} set={traceSet} nodeMap={nodeMap} childrenOf={childrenOf} onClear={() => setPinnedTrace(null)} />
           ) : selNode ? (
-            <Inspector node={selNode} patch={patch} remove={removeNode} childrenOf={childrenOf} addNode={addNode} drill={drill} />
+            <Inspector node={selNode} patch={patch} remove={removeNode} childrenOf={childrenOf} addNode={addNode} drill={drill}
+              editable={canEdit(selNode)} owner={personOf(selNode.owner)} canAssign={!!me && me.role === "manager"} />
           ) : (
             parent === "elec_net" ? (
               <div style={{ fontSize: 12.5, color: "#4E4E4E", lineHeight: 1.65 }}>
@@ -517,8 +618,11 @@ function ZoomBtn({ title, onClick, children }) {
 const ghost = { display: "inline-flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 4, color: "#4E4E4E", borderRadius: 6 };
 const inp = { width: "100%", boxSizing: "border-box", fontSize: 12.5, padding: "6px 8px", border: "1px solid #E0E0E2", borderRadius: 7, outline: "none", color: "#2D2D2D", background: "#fff" };
 
-function PalItem({ label, color, Icon, onClick }) {
-  return <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, padding: "7px 9px", border: `1px solid ${color}44`, background: color + "12", color, borderRadius: 8, cursor: "pointer", fontWeight: 500, textAlign: "left" }}><Icon size={15} /> {label}</button>;
+function PalItem({ label, color, Icon, onClick, disabled }) {
+  return <button onClick={onClick} disabled={disabled}
+    style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, padding: "7px 9px", borderRadius: 8, fontWeight: 500, textAlign: "left",
+      border: `1px solid ${disabled ? "#E0E0E2" : color + "44"}`, background: disabled ? "#FAFAFA" : color + "12",
+      color: disabled ? "#BCBCBC" : color, cursor: disabled ? "not-allowed" : "pointer" }}><Icon size={15} /> {label}</button>;
 }
 function Field({ label, children }) {
   return <div style={{ marginBottom: 10 }}><div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".04em", color: "#A3A3A3", marginBottom: 4 }}>{label}</div>{children}</div>;
@@ -558,19 +662,50 @@ function TracePanel({ root, set, nodeMap, childrenOf, onClear }) {
   );
 }
 
-function Inspector({ node, patch, remove, childrenOf, addNode, drill }) {
+function Inspector({ node, patch, remove, childrenOf, addNode, drill, editable, owner, canAssign }) {
   const s = styleOf(node), cont = isContainer(node.type), kids = cont ? childrenOf(node.id) : [];
+  const fld = editable ? inp : { ...inp, background: "#F5F5F5", color: "#707070", cursor: "not-allowed" };
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10, textTransform: "uppercase", letterSpacing: ".05em", color: node.type === "meter" ? meterColor(node) : s.color, fontWeight: 600 }}>{node.type === "meter" ? <Gauge size={13} /> : <s.Icon size={13} />} {node.type === "stream" ? "Material" : node.type === "meter" ? (node.meterType ? meterKind(node) : "Meter") : s.label}</span>
-        <button onClick={() => remove(node.id)} style={{ ...ghost, color: "#C0392B" }}><Trash2 size={14} /></button>
+        {editable && <button onClick={() => remove(node.id)} style={{ ...ghost, color: "#C0392B" }}><Trash2 size={14} /></button>}
       </div>
+
+      <Field label="Responsible">
+        {canAssign ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 8, background: owner ? owner.color : "#C3C3C3", flexShrink: 0 }} />
+            <select value={node.owner || ""} onChange={(e) => patch(node.id, { owner: e.target.value || null })} style={{ ...inp, cursor: "pointer" }}>
+              <option value="">Unassigned</option>
+              {PEOPLE.filter((p) => p.role !== "viewer").map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
+            </select>
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 8, background: owner ? owner.color : "#C3C3C3", flexShrink: 0 }} />
+            <span>{owner ? owner.title : "Unassigned"}</span>
+          </div>
+        )}
+      </Field>
+
+      {canAssign && !node.owner && (
+        <div style={{ fontSize: 11, lineHeight: 1.5, color: "#8A6D00", background: "#FFF9E6", border: `1px solid ${BRAND.yellow}55`, borderRadius: 8, padding: "7px 9px", marginBottom: 11 }}>
+          Not assigned yet — pick the team that will report this item, otherwise nobody owns its data.
+        </div>
+      )}
+
+      {!editable && (
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 7, fontSize: 11.5, lineHeight: 1.5, color: "#707070", background: "#F8F8F8", border: "1px solid #E0E0E2", borderRadius: 8, padding: "8px 10px", marginBottom: 11 }}>
+          <Lock size={12} style={{ marginTop: 1, flexShrink: 0 }} />
+          <span>Read-only — you are not responsible for this item. Changes would need its owner, or an approval.</span>
+        </div>
+      )}
 
       <Field label={node.type === "meter" ? "Meter ID" : "Name"}>
         {node.type === "meter"
-          ? <input value={node.meterId} onChange={(e) => patch(node.id, { meterId: e.target.value, label: e.target.value })} style={inp} />
-          : <input value={node.label} onChange={(e) => patch(node.id, { label: e.target.value })} style={inp} />}
+          ? <input value={node.meterId} disabled={!editable} onChange={(e) => patch(node.id, { meterId: e.target.value, label: e.target.value })} style={fld} />
+          : <input value={node.label} disabled={!editable} onChange={(e) => patch(node.id, { label: e.target.value })} style={fld} />}
       </Field>
 
       {s.emit && node.type !== "meter" && (
@@ -583,8 +718,8 @@ function Inspector({ node, patch, remove, childrenOf, addNode, drill }) {
             <Field label="Meter type"><span style={{ fontSize: 12.5, fontWeight: 500, color: meterColor(node) }}>{meterKind(node)}</span></Field>
           )}
           <div style={{ display: "flex", gap: 6 }}>
-            <Field label="Reading"><input value={node.value} onChange={(e) => patch(node.id, { value: parseFloat(e.target.value) || 0 })} style={inp} /></Field>
-            <Field label="Unit"><input value={node.unit} onChange={(e) => patch(node.id, { unit: e.target.value })} style={inp} /></Field>
+            <Field label="Reading"><input value={node.value} disabled={!editable} onChange={(e) => patch(node.id, { value: parseFloat(e.target.value) || 0 })} style={fld} /></Field>
+            <Field label="Unit"><input value={node.unit} disabled={!editable} onChange={(e) => patch(node.id, { unit: e.target.value })} style={fld} /></Field>
           </div>
           {node.meterType && (
             <div style={{ border: "1px solid #ECEDED", borderRadius: 9, padding: 10, background: "#F8F8F8", fontSize: 11.5 }}>
@@ -604,8 +739,8 @@ function Inspector({ node, patch, remove, childrenOf, addNode, drill }) {
       )}
 
       {node.type === "product" && (
-        <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, marginBottom: 10, cursor: "pointer" }}>
-          <input type="checkbox" checked={!!node.final} onChange={(e) => patch(node.id, { final: e.target.checked })} /> Final product (else feeds the next process)
+        <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, marginBottom: 10, cursor: editable ? "pointer" : "not-allowed", color: editable ? "#2D2D2D" : "#A3A3A3" }}>
+          <input type="checkbox" checked={!!node.final} disabled={!editable} onChange={(e) => patch(node.id, { final: e.target.checked })} /> Final product (else feeds the next process)
         </label>
       )}
 
@@ -622,7 +757,7 @@ function Inspector({ node, patch, remove, childrenOf, addNode, drill }) {
         <>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4, marginBottom: 6 }}>
             <span style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".04em", color: "#A3A3A3" }}>{node.type === "material" ? "Streams" : "Meters"} ({kids.length})</span>
-            <button onClick={() => addNode(node.type === "material" ? "stream" : "meter")} style={{ ...ghost, color: s.color, fontSize: 12 }}><Plus size={13} /> add</button>
+            {editable && <button onClick={() => addNode(node.type === "material" ? "stream" : "meter")} style={{ ...ghost, color: s.color, fontSize: 12 }}><Plus size={13} /> add</button>}
           </div>
           {kids.slice(0, 8).map((m) => (
             <div key={m.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "5px 8px", border: "1px solid #ECEDED", borderRadius: 7, marginBottom: 5 }}>
@@ -636,12 +771,16 @@ function Inspector({ node, patch, remove, childrenOf, addNode, drill }) {
       )}
 
       <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-        <Tag active={node.cbam} onClick={() => patch(node.id, { cbam: !node.cbam })}>CBAM</Tag>
-        <Tag active={node.ets} onClick={() => patch(node.id, { ets: !node.ets })}>EU ETS</Tag>
+        <Tag active={node.cbam} disabled={!editable} onClick={() => patch(node.id, { cbam: !node.cbam })}>CBAM</Tag>
+        <Tag active={node.ets} disabled={!editable} onClick={() => patch(node.id, { ets: !node.ets })}>EU ETS</Tag>
       </div>
     </div>
   );
 }
-function Tag({ active, onClick, children }) {
-  return <button onClick={onClick} style={{ fontSize: 11, fontWeight: active ? 600 : 400, padding: "4px 10px", borderRadius: 20, cursor: "pointer", border: `1px solid ${active ? BRAND.yellowDeep : "#E0E0E2"}`, background: active ? BRAND.yellow : "#fff", color: active ? BRAND.ink : "#A3A3A3" }}>{children}</button>;
+function Tag({ active, onClick, disabled, children }) {
+  return <button onClick={onClick} disabled={disabled}
+    style={{ fontSize: 11, fontWeight: active ? 600 : 400, padding: "4px 10px", borderRadius: 20, cursor: disabled ? "not-allowed" : "pointer",
+      border: `1px solid ${active && !disabled ? BRAND.yellowDeep : "#E0E0E2"}`,
+      background: active ? (disabled ? "#EDEDED" : BRAND.yellow) : "#fff",
+      color: active ? (disabled ? "#909090" : BRAND.ink) : "#A3A3A3" }}>{children}</button>;
 }
